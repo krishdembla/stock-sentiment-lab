@@ -1,2 +1,2 @@
 # stock-sentiment-lab
-ML + LLM Sentiment analysis model to predict stock movements
+A real-time stock prediction app combining market data, valuation models, and LLM-driven sentiment.

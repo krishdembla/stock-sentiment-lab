@@ -1,0 +1,35 @@
+{
+  "best_params": {
+    "n_estimators": 200,
+    "learning_rate": 0.02,
+    "max_depth": 4,
+    "min_child_weight": 7,
+    "subsample": 1.0,
+    "colsample_bytree": 0.6,
+    "reg_alpha": 0.001,
+    "reg_lambda": 0.5,
+    "gamma": 0.0
+  },
+  "train": {
+    "rmse": 0.01006124905701168,
+    "mae": 0.007223125756467174,
+    "r2": 0.6535943975141164
+  },
+  "val": {
+    "rmse": 0.014928774616779853,
+    "mae": 0.009318567130160403,
+    "r2": 0.5728931493152924
+  },
+  "test": {
+    "rmse": 0.009665145966180082,
+    "mae": 0.007034906116543695,
+    "r2": 0.4885305808874262
+  },
+  "num_rows": 4770,
+  "period": "4y",
+  "splits": {
+    "train_frac": 0.7,
+    "val_frac": 0.15,
+    "test_frac": 0.15
+  }
+}

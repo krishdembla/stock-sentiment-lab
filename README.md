@@ -1,102 +1,99 @@
-# stock volatility prediction & position sizing
+# Risk Parity Portfolio Builder
 
-predicts how much stocks will move (not which direction) and uses that to figure out position sizes for risk management.
+An ML-powered portfolio construction tool that uses predicted volatility to build equal-risk portfolios. Instead of sizing positions by dollar amount or arbitrary percentages, this tool adjusts position sizes so each stock contributes the same amount of risk to your portfolio.
 
-**[🚀 Try Live Demo](https://your-app.streamlit.app)** | [View Code](https://github.com/krishdembla/stock-sentiment-lab)
+Try it here: https://riskparityportfoliobuilder.streamlit.app
 
-## what it does
+## What It Does
 
-most people size positions based on gut feel or arbitrary percentages. this uses machine learning to adjust position sizes based on predicted volatility:
+Traditional portfolio allocation gives each position the same dollar weight (equal weighting) or weights by market cap. Both ignore risk. A $10,000 position in a volatile tech stock carries far more risk than a $10,000 position in a stable utility stock.
 
-- **low volatility stock** (like WMT) → bigger position
-- **high volatility stock** (like TSLA) → smaller position
-- **each position risks the same dollar amount**
+Risk parity fixes this by using volatility predictions to size positions:
 
-example with $100k account, risking 1% ($1,000) per position:
+- Low volatility stock (WMT, JNJ, PG) gets a larger position
+- High volatility stock (TSLA, NVDA, META) gets a smaller position  
+- Each position risks the same dollar amount
+
+Example with $100,000 account risking 1% ($1,000) per position:
+
 ```
-TSLA (3% daily volatility):  $16,779 position  →  risks $1,000
-WMT  (0.9% daily volatility): $56,180 position  →  risks $1,000
-```
-
-same risk, different position sizes. that's the point.
-
-## how it works
-
-the xgboost model predicts daily volatility using 76 features:
-- technical indicators (rsi, macd, bollinger bands, moving averages)
-- market context (spy and vix movements)
-- realized volatility over different time windows
-
-model performance: **R² = 0.533** (explains 53% of volatility variation)
-
-position sizing formula:
-```
-position = (account × risk%) / (2 × predicted_volatility)
+TSLA (predicted 3% daily volatility):   $16,667 position
+WMT  (predicted 0.9% daily volatility): $55,556 position
 ```
 
-the 2x multiplier is a safety buffer (2 standard deviations).
+Both positions risk $1,000, but TSLA gets 1/3 the capital because it's 3x more volatile.
 
-## quick start
+## How It Works
 
-**web app (easiest):**
-```bash
-streamlit run app.py
+The app uses an XGBoost regression model trained to predict daily volatility. The model analyzes 76 technical features including:
+
+- Realized volatility over multiple time windows (5-day, 20-day, 60-day)
+- Technical indicators (RSI, MACD, Bollinger Bands, ATR)
+- Market context (S&P 500 and VIX movements)
+- Volume patterns and price momentum
+
+Model performance: R² = 0.533 on test data (explains 53% of volatility variation). This is on par with academic benchmarks for volatility forecasting.
+
+Once volatility is predicted, positions are sized using:
+
 ```
-Then open http://localhost:8501 in your browser.
-
-**command line:**
-
-run the demo (no downloads needed):
-```bash
-python demo_position_sizing.py
-```
-
-or get predictions for specific stocks:
-```bash
-python predict.py --tickers AAPL MSFT TSLA --account 100000 --risk 0.01
+position_size = (account_value * risk_per_trade) / (2 * predicted_volatility)
 ```
 
-the cache already has data for 28 stocks (aapl, msft, tsla, nvda, etc). to refresh:
-```bash
-python download_yahooquery.py
-```
+The 2x multiplier provides a safety buffer (roughly 2 standard deviations).
 
-## what's in the repo
+## Features
 
-- **predict.py**: cli tool for position sizing calculations
-- **demo_position_sizing.py**: standalone demo with example predictions
-- **download_yahooquery.py**: downloads fresh data for all 28 tickers
-- **models/**: trained xgboost model and metadata
-- **cache/**: pre-downloaded stock data (4 years for each ticker)
-- **utils/features.py**: feature engineering pipeline
+- Real-time volatility predictions for 28 large-cap stocks
+- Interactive portfolio construction with customizable account size and risk tolerance
+- Backtest analysis showing historical performance vs equal-weight benchmark
+- Performance metrics including Sharpe ratio, max drawdown, and return statistics
+- Visual equity curve comparison
+- ML model transparency (feature importance, prediction confidence, model metrics)
 
-## dependencies
+## Repository Structure
+
+- **app.py**: Streamlit web interface
+- **predict.py**: Core prediction and position sizing logic
+- **backtest.py**: Historical backtest engine
+- **data/fetch_stock_data.py**: Data download utilities
+- **models/**: Trained XGBoost model and feature metadata
+- **utils/features.py**: Feature engineering pipeline
+- **cache/**: Pre-downloaded stock data (28 tickers, 4 years each)
+
+## Running Locally
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-main libraries: pandas, xgboost, yahooquery, scikit-learn
+Run the app:
 
-## model details
+```bash
+streamlit run app.py
+```
 
-trained on 28 large-cap stocks with 4 years of data each. uses time-based train/val/test splits (70/15/15) to avoid lookahead bias.
+The app will open at http://localhost:8501.
 
-the model does better at predicting volatility than stock direction because volatility has patterns - it clusters (high vol follows high vol) and mean-reverts (extreme vol doesn't last). price direction is basically random.
+## Model Training
 
-## why volatility prediction
+The model was trained on 28 large-cap stocks with 4 years of daily data (19,684 total observations). Training used time-based splits (70% train, 15% validation, 15% test) to avoid lookahead bias.
 
-tried predicting if stocks go up or down → got 50% accuracy (coin flip).
+Volatility is more predictable than price direction because it exhibits clustering (high volatility tends to follow high volatility) and mean reversion (extreme volatility doesn't persist). The model captures these patterns through short-term realized volatility features and technical indicators.
 
-switched to predicting volatility → got R² of 0.533 (actually works).
+Key predictors: 5-day realized volatility, 20-day realized volatility, ATR (Average True Range), and volatility ratio (current vs historical average).
 
-turns out you can't predict direction, but you can predict how much stocks will move. that's useful for risk management even if you don't know which way they'll go.
+## Why Volatility Instead of Direction
 
-## the 76 features
+Initial attempts to predict price direction achieved 50% accuracy (no better than random). Volatility prediction reached R² of 0.533, which is meaningful for risk management even without knowing which direction prices will move.
 
-technical indicators (moving averages, rsi, macd, bollinger bands), market context (spy/vix correlation), realized volatility over different windows, volume patterns, and time features.
+This aligns with empirical finance research: returns are largely unpredictable, but volatility shows autocorrelation and can be forecast with moderate accuracy.
 
-top predictors are short-term realized volatility (5-day, 20-day) and current volatility vs historical average. the model basically learns that volatility clusters - if yesterday was volatile, today probably will be too.
+## Technologies
+
+Python, Streamlit, XGBoost, scikit-learn, pandas, yfinance, plotly, SHAP
 
 ## known issues
 

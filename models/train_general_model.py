@@ -42,11 +42,18 @@ TICKERS = [
     'XOM', 'CVX', 'COP'
 ]
 
-CACHE_DIR = os.path.join(project_root, "data", "cache")
+CACHE_DIR = os.path.join(project_root, "cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-def prepare_data(target_type: str = 'volatility', period: str = '3y', use_cache: bool = True) -> pd.DataFrame:
-    """Prepare data for training. Uses cache if available, otherwise fetches from yfinance."""
+def prepare_data(target_type: str = 'volatility', period: str = '3y', use_cache: bool = True, target_horizon: int = 3) -> pd.DataFrame:
+    """Prepare data for training. Uses cache if available, otherwise fetches from yfinance.
+    
+    Args:
+        target_type: Type of prediction target ('volatility', 'direction', 'return', 'momentum')
+        period: Historical data period to fetch ('1y', '2y', '3y', '4y', '5y')
+        use_cache: Whether to use cached data
+        target_horizon: Number of days to predict into the future (1, 5, 10, 20)
+    """
     all_dfs: list[pd.DataFrame] = []
     
     for ticker in TICKERS:
@@ -63,7 +70,7 @@ def prepare_data(target_type: str = 'volatility', period: str = '3y', use_cache:
                 df.reset_index(inplace=True)
                 if "index" in df.columns and "Date" not in df.columns:
                     df.rename(columns={"index": "Date"}, inplace=True)
-                df = add_features(df, target_type=target_type)
+                df = add_features(df, target_type=target_type, target_horizon=target_horizon)
                 all_dfs.append(df)
                 print(f"Processed {ticker} from cache - {len(df)} rows")
                 continue
@@ -74,7 +81,7 @@ def prepare_data(target_type: str = 'volatility', period: str = '3y', use_cache:
         try:
             print(f"Fetching data for {ticker}...")
             df = get_stock_data(ticker, period=period)
-            df = add_features(df, target_type=target_type)
+            df = add_features(df, target_type=target_type, target_horizon=target_horizon)
             all_dfs.append(df)
             
             # Save to cache for future use
@@ -108,6 +115,22 @@ def prepare_data(target_type: str = 'volatility', period: str = '3y', use_cache:
         market_cols = ['SPY_Return', 'SPY_Volatility', 'SPY_Trend_5d', 'Relative_Return', 
                       'Relative_Volatility', 'VIX_Level', 'VIX_Change']
         for col in market_cols:
+            if col not in combined_df.columns:
+                combined_df[col] = 0.0
+    
+    # Add sentiment features (Fear & Greed Index) - do this after market context
+    print("Adding sentiment features (Fear & Greed Index)...")
+    try:
+        from utils.features import add_sentiment_features
+        combined_df = add_sentiment_features(combined_df)
+        print("Sentiment features added successfully")
+    except Exception as e:
+        print(f"Warning: Could not add sentiment features: {e}")
+        # Add zero columns so feature list is consistent
+        sentiment_cols = ['Fear_Greed', 'Fear_Greed_MA7', 'Fear_Greed_MA30', 'Fear_Greed_Change', 
+                         'Fear_Greed_Change_7d', 'Extreme_Fear', 'Extreme_Greed', 'Fear_Zone', 
+                         'Greed_Zone', 'Fear_Greed_Rising', 'Fear_Greed_Volatility']
+        for col in sentiment_cols:
             if col not in combined_df.columns:
                 combined_df[col] = 0.0
     
@@ -159,13 +182,22 @@ def _random_param() -> dict:
     }
 
 
-def train_model(num_param_samples: int = 50, early_stopping_rounds: int = 50, target_type: str = 'volatility', period: str = '3y'):
-    df = prepare_data(target_type=target_type, period=period)
+def train_model(num_param_samples: int = 50, early_stopping_rounds: int = 50, target_type: str = 'volatility', period: str = '3y', target_horizon: int = 3):
+    """Train model with specified parameters.
+    
+    Args:
+        num_param_samples: Number of random hyperparameter combinations to try
+        early_stopping_rounds: Early stopping patience (not currently used)
+        target_type: Type of prediction ('volatility', 'direction', 'return', 'momentum')
+        period: Historical data period ('1y', '2y', '3y', '4y', '5y')
+        target_horizon: Number of days to predict into the future (1, 5, 10, 20)
+    """
+    df = prepare_data(target_type=target_type, period=period, target_horizon=target_horizon)
 
     # Encode the ticker symbol
     le = LabelEncoder()
     df['Encoded_Ticker'] = le.fit_transform(df['Ticker']).squeeze()
-
+    
     feature_columns = list(FEATURE_COLUMNS_DEFAULT) + ['Encoded_Ticker']
     X = df[feature_columns]
     y = df['Target']
@@ -251,6 +283,7 @@ def train_model(num_param_samples: int = 50, early_stopping_rounds: int = 50, ta
                 },
                 'num_rows': len(df),
                 'period': period,
+                'target_horizon_days': target_horizon,
             }, f, indent=2)
 
         # Feature importances - use multiple methods
@@ -361,6 +394,7 @@ def train_model(num_param_samples: int = 50, early_stopping_rounds: int = 50, ta
             'test': metrics_test,
             'num_rows': len(df),
             'period': period,
+            'target_horizon_days': target_horizon,
             'splits': {
                 'train_frac': 0.7,
                 'val_frac': 0.15,

@@ -6,3 +6,6 @@ matplotlib
 xgboost
 ta
 shap
+optuna
+yahooquery
+streamlit

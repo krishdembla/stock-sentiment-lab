@@ -1,0 +1,20 @@
+{
+  "risk_parity": {
+    "total_return": 38.51770260362342,
+    "annualized_return": 11.718025935801624,
+    "volatility": 15.225586990267034,
+    "sharpe_ratio": 0.6382693778580673,
+    "max_drawdown": -20.822691517504886,
+    "win_rate": 51.621621621621614,
+    "final_value": 138517.70260362342
+  },
+  "equal_weight": {
+    "total_return": 69.71266286264404,
+    "annualized_return": 19.707523043223873,
+    "volatility": 17.979386984628515,
+    "sharpe_ratio": 0.9848791317725643,
+    "max_drawdown": -24.45076037109821,
+    "win_rate": 54.45945945945946,
+    "final_value": 169712.66286264404
+  }
+}

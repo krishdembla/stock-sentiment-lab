@@ -3,30 +3,170 @@ import pandas as pd
 import numpy as np
 from typing import Sequence, Tuple
 import yfinance as yf
+import requests
+from datetime import datetime, timedelta
+import time
 
 
 def _ensure_series(obj: pd.Series | pd.DataFrame) -> pd.Series:
     if isinstance(obj, pd.DataFrame):
-        # Take the first column if a DataFrame slips through (e.g., duplicate column names)
         return obj.iloc[:, 0].astype(float)
     return pd.Series(obj).astype(float)
 
 
-def add_features(df: pd.DataFrame, rsi_window: int = 14, vol_window: int = 5, momentum_lag: int = 5, ma_short: int = 10, ma_long: int = 50, target_horizon: int = 3, target_type: str = 'volatility') -> pd.DataFrame:
-    """Add technical features and target to a price DataFrame.
+# ============================================================================
+# SENTIMENT FEATURES - Fear & Greed Index
+# ============================================================================
 
-    Expects columns: ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume', 'Ticker']
-    Returns a new DataFrame with NaNs dropped after all feature construction.
+def get_fear_greed_index(date: pd.Timestamp = None) -> float:
+    """
+    Fetch Fear & Greed Index from Alternative.me API.
     
-    target_type options:
-    - 'return': (future_price - current_price) / current_price
-    - 'direction': 1 if future_return > 0, 0 otherwise
-    - 'volatility': future_price volatility over target_horizon (RECOMMENDED)
-    - 'momentum': future_price momentum (trend strength)
+    Returns value 0-100:
+    - 0-25: Extreme Fear
+    - 25-45: Fear
+    - 45-55: Neutral
+    - 55-75: Greed
+    - 75-100: Extreme Greed
+    
+    Args:
+        date: Date to fetch index for (defaults to today)
+    
+    Returns:
+        Fear & Greed Index value (0-100), or 50 (neutral) on error
+    """
+    try:
+        # API endpoint (free, no key required)
+        url = "https://api.alternative.me/fng/?limit=2000&format=json"
+        
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        if not data.get('data'):
+            return 50.0  # Neutral default
+        
+        # If no date specified, return latest
+        if date is None:
+            return float(data['data'][0]['value'])
+        
+        # Find closest date
+        target_timestamp = int(date.timestamp())
+        closest_value = 50.0
+        min_diff = float('inf')
+        
+        for entry in data['data']:
+            entry_timestamp = int(entry['timestamp'])
+            diff = abs(entry_timestamp - target_timestamp)
+            
+            if diff < min_diff:
+                min_diff = diff
+                closest_value = float(entry['value'])
+            
+            # If we found exact match or within 1 day, use it
+            if diff < 86400:  # 1 day in seconds
+                return closest_value
+        
+        return closest_value
+        
+    except Exception as e:
+        # Return neutral (50) on any error
+        print(f"Warning: Could not fetch Fear & Greed Index: {e}")
+        return 50.0
+
+
+def add_sentiment_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    adds sentiment features using the fear & greed index
+    
+    pulls historical fear & greed data (0-100 scale) and calculates:
+    - current reading
+    - 7-day moving average
+    - day-over-day change
+    - extreme fear indicator (below 25)
+    - extreme greed indicator (above 75)
+    - overall sentiment regime
+    
+    returns the dataframe with sentiment columns added
+    """
+    df = df.copy()
+    
+    # make sure we have a date column to work with
+    if 'Date' not in df.columns:
+        raise ValueError("DataFrame must have a 'Date' column")
+    
+    print("Fetching Fear & Greed Index data...")
+    
+    # Fetch once for all dates (API returns historical data)
+    try:
+        url = "https://api.alternative.me/fng/?limit=2000&format=json"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        api_data = response.json()
+        
+        # Create lookup dictionary: date -> value
+        fg_lookup = {}
+        for entry in api_data.get('data', []):
+            entry_date = pd.to_datetime(int(entry['timestamp']), unit='s').date()
+            fg_lookup[entry_date] = float(entry['value'])
+        
+        # Map to dataframe dates
+        df['Fear_Greed'] = df['Date'].apply(
+            lambda d: fg_lookup.get(pd.to_datetime(d).date(), 50.0)
+        )
+        
+        print(f"  Fetched {len(fg_lookup)} days of Fear & Greed data")
+        
+    except Exception as e:
+        print(f"  Warning: Error fetching Fear & Greed data: {e}")
+        print(f"  Using neutral default (50) for all dates")
+        df['Fear_Greed'] = 50.0
+    
+    # Derived sentiment features
+    df['Fear_Greed_MA7'] = df['Fear_Greed'].rolling(7, min_periods=1).mean()
+    df['Fear_Greed_MA30'] = df['Fear_Greed'].rolling(30, min_periods=1).mean()
+    df['Fear_Greed_Change'] = df['Fear_Greed'].diff()
+    df['Fear_Greed_Change_7d'] = df['Fear_Greed'].diff(7)
+    
+    # Regime indicators (binary flags)
+    df['Extreme_Fear'] = (df['Fear_Greed'] < 25).astype(int)
+    df['Extreme_Greed'] = (df['Fear_Greed'] > 75).astype(int)
+    df['Fear_Zone'] = (df['Fear_Greed'] < 45).astype(int)  # Fear or extreme fear
+    df['Greed_Zone'] = (df['Fear_Greed'] > 55).astype(int)  # Greed or extreme greed
+    
+    # Trend: Is fear/greed increasing or decreasing?
+    df['Fear_Greed_Rising'] = (df['Fear_Greed_MA7'] > df['Fear_Greed_MA30']).astype(int)
+    
+    # Volatility of sentiment (how quickly sentiment changes)
+    df['Fear_Greed_Volatility',
+    # Realized volatility features (added by add_realized_volatility_features) - NEW for Phase 1
+    'Realized_Vol_5d', 'Realized_Vol_20d', 'Realized_Vol_60d', 'Vol_Ratio_20_60', 'Vol_Distance_Mean',
+    'Vol_Persistence', 'Vol_Momentum', 'Vol_of_Vol', 'Vol_Trend_20d', 'Vol_Regime_Low', 
+    'Vol_Regime_High', 'Realized_Vol_EMA_20'] = df['Fear_Greed'].rolling(14, min_periods=1).std()
+    
+    print(f"  ✓ Created 10 sentiment features")
+    
+    return df
+
+
+
+def add_features(df: pd.DataFrame, rsi_window: int = 14, vol_window: int = 5, momentum_lag: int = 5, ma_short: int = 10, ma_long: int = 50, target_horizon: int = 3, target_type: str = 'volatility') -> pd.DataFrame:
+    """
+    calculates all the technical indicators for a stock
+    
+    takes raw ohlcv data and adds features like:
+    - moving averages, rsi, macd, bollinger bands
+    - volume indicators (obv, money flow)
+    - volatility measurements
+    - momentum and trend signals
+    
+    expects columns: date, open, high, low, close, adj close, volume, ticker
+    
+    returns dataframe with ~40 new feature columns
     """
     df = df.copy()
 
-    # Coerce base columns to 1D series
+    # convert columns to 1d series (sometimes they come as dataframes)
     close_series = _ensure_series(df['Close'])
     volume_series = _ensure_series(df['Volume'])
     high_series = _ensure_series(df['High'])
@@ -117,6 +257,22 @@ def add_features(df: pd.DataFrame, rsi_window: int = 14, vol_window: int = 5, mo
     # Commodity Channel Index (CCI)
     df['CCI'] = ta.trend.CCIIndicator(high=high_series, low=low_series, close=close_series).cci()
 
+    # Interaction Features
+    df['RSI_x_Volume'] = df['RSI'] * df['Volume_Ratio']
+    df['Volatility_x_Momentum'] = df['Volatility'] * df['Momentum']
+
+    # Time-Based Features
+    df['Day_of_Week'] = pd.to_datetime(df['Date']).dt.dayofweek
+    df['Month'] = pd.to_datetime(df['Date']).dt.month
+
+    # Fourier Transforms for Seasonality
+    close_fft = np.fft.fft(close_series.fillna(0))
+    df['FFT_Real'] = np.real(close_fft)
+    df['FFT_Imag'] = np.imag(close_fft)
+    
+    # Add realized volatility features (for enhanced volatility prediction)
+    df = add_realized_volatility_features(df)
+
     # Multiple target formulations
     if target_type == 'return':
         df['Target'] = (close_series.shift(-target_horizon) - close_series) / close_series
@@ -137,19 +293,112 @@ def add_features(df: pd.DataFrame, rsi_window: int = 14, vol_window: int = 5, mo
     return df
 
 
-def add_market_context(df: pd.DataFrame, period: str = '3y') -> pd.DataFrame:
-    """Add market context features (SPY, VIX) to the dataframe.
+# ============================================================================
+# VOLATILITY-SPECIFIC FEATURES - For Enhanced Volatility Prediction
+# ============================================================================
+
+def add_realized_volatility_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    adds realized volatility features to help predict future volatility
     
-    Args:
-        df: DataFrame with Date column and stock data
-        period: Period to fetch market data (should match stock data period)
+    these features capture how volatile the stock has been recently:
+    - short-term (5-day), medium (20-day), long-term (60-day) volatility
+    - whether current volatility is higher or lower than usual
+    - if volatility is trending up or down
+    - volatility of volatility (how unstable the volatility itself is)
     
-    Returns:
-        DataFrame with added market context features
+    why this works: volatility has momentum - if it's been volatile lately, 
+    it'll probably stay volatile. but it also mean-reverts - extreme volatility 
+    doesn't last forever.
+    
+    returns dataframe with ~12 new volatility-focused features
     """
     df = df.copy()
     
-    # Ensure Date column exists and is datetime
+    # make sure we have returns calculated first
+    if 'Return' not in df.columns:
+        df['Return'] = df['Close'].pct_change()
+    
+    # calculate realized volatility over different time windows
+    # (standard deviation of returns)
+    
+    # 5 days = short-term volatility
+    df['Realized_Vol_5d'] = df['Return'].rolling(window=5).std()
+    
+    # Medium-term volatility (20 trading days = 1 month)
+    df['Realized_Vol_20d'] = df['Return'].rolling(window=20).std()
+    
+    # Long-term volatility (60 trading days = 3 months)
+    df['Realized_Vol_60d'] = df['Return'].rolling(window=60).std()
+    
+    # 2. Mean Reversion Signal: Current vol vs long-term average
+    # When ratio > 1: volatility is elevated (likely to decrease)
+    # When ratio < 1: volatility is suppressed (likely to increase)
+    df['Vol_Ratio_20_60'] = df['Realized_Vol_20d'] / (df['Realized_Vol_60d'] + 1e-8)
+    
+    # Alternative mean reversion: distance from long-term mean
+    long_term_mean_vol = df['Realized_Vol_60d'].rolling(window=252, min_periods=60).mean()
+    df['Vol_Distance_Mean'] = (df['Realized_Vol_20d'] - long_term_mean_vol) / (long_term_mean_vol + 1e-8)
+    
+    # 3. Volatility Persistence: Autocorrelation of volatility
+    # High persistence means volatility trends continue
+    # Calculate as correlation between recent vol and previous vol
+    df['Vol_Persistence'] = df['Realized_Vol_20d'].rolling(window=40).apply(
+        lambda x: x.autocorr(lag=1) if len(x) >= 2 else 0, raw=False
+    )
+    
+    # Alternative persistence: ratio of short-term to medium-term vol
+    df['Vol_Momentum'] = df['Realized_Vol_5d'] / (df['Realized_Vol_20d'] + 1e-8)
+    
+    # 4. Volatility of Volatility (Vol-of-Vol): Uncertainty measure
+    # High vol-of-vol means volatility itself is unstable
+    df['Vol_of_Vol'] = df['Realized_Vol_20d'].rolling(window=20).std()
+    
+    # 5. Volatility Trend: Is volatility increasing or decreasing?
+    df['Vol_Trend_20d'] = df['Realized_Vol_20d'] - df['Realized_Vol_20d'].shift(20)
+    
+    # 6. Volatility Regime Indicators (quartile-based)
+    # Identify if current volatility is low, medium, or high vs historical
+    vol_q25 = df['Realized_Vol_60d'].rolling(window=252, min_periods=60).quantile(0.25)
+    vol_q75 = df['Realized_Vol_60d'].rolling(window=252, min_periods=60).quantile(0.75)
+    
+    df['Vol_Regime_Low'] = (df['Realized_Vol_20d'] < vol_q25).astype(int)
+    df['Vol_Regime_High'] = (df['Realized_Vol_20d'] > vol_q75).astype(int)
+    
+    # 7. Exponential Moving Average of volatility (gives more weight to recent data)
+    df['Realized_Vol_EMA_20'] = df['Return'].ewm(span=20).std()
+    
+    # Fill any remaining NaNs with 0 (for initial rows where windows aren't full)
+    volatility_cols = [
+        'Realized_Vol_5d', 'Realized_Vol_20d', 'Realized_Vol_60d',
+        'Vol_Ratio_20_60', 'Vol_Distance_Mean', 'Vol_Persistence',
+        'Vol_Momentum', 'Vol_of_Vol', 'Vol_Trend_20d',
+        'Vol_Regime_Low', 'Vol_Regime_High', 'Realized_Vol_EMA_20'
+    ]
+    
+    for col in volatility_cols:
+        if col in df.columns:
+            df[col] = df[col].fillna(0)
+    
+    return df
+
+
+def add_market_context(df: pd.DataFrame, period: str = '3y') -> pd.DataFrame:
+    """
+    adds market context features using spy and vix
+    
+    gives the model information about what the broader market is doing:
+    - spy return, volatility, and trend (market benchmark)
+    - vix level and change (fear gauge)
+    - relative metrics (how this stock compares to spy)
+    
+    helps the model understand if high volatility is stock-specific or market-wide
+    
+    returns dataframe with ~7 market context features
+    """
+    df = df.copy()
+    
+    # make sure we have a date column
     if 'Date' not in df.columns:
         if isinstance(df.index, pd.DatetimeIndex):
             df.reset_index(inplace=True)
@@ -185,11 +434,18 @@ def add_market_context(df: pd.DataFrame, period: str = '3y') -> pd.DataFrame:
     
     # Fetch SPY (market) data
     try:
-        spy = yf.download('SPY', start=start_str, end=end_str, progress=False, auto_adjust=False)
-        if not spy.empty:
+        # Try cache first
+        from pathlib import Path
+        cache_path = Path(__file__).parent.parent / "cache" / "SPY.csv"
+        if cache_path.exists():
+            spy = pd.read_csv(cache_path, parse_dates=['Date'])
+        else:
+            spy = yf.download('SPY', start=start_str, end=end_str, progress=False, auto_adjust=False)
             spy.reset_index(inplace=True)
             if 'index' in spy.columns:
                 spy.rename(columns={'index': 'Date'}, inplace=True)
+        
+        if not spy.empty:
             spy['Date'] = pd.to_datetime(spy['Date'])
             spy['SPY_Return'] = spy['Close'].pct_change()
             spy['SPY_Volatility'] = spy['SPY_Return'].rolling(5).std()
@@ -214,11 +470,18 @@ def add_market_context(df: pd.DataFrame, period: str = '3y') -> pd.DataFrame:
     
     # Fetch VIX (volatility index) data
     try:
-        vix = yf.download('^VIX', start=start_str, end=end_str, progress=False, auto_adjust=False)
-        if not vix.empty:
+        # Try cache first
+        from pathlib import Path
+        cache_path = Path(__file__).parent.parent / "cache" / "VIX.csv"
+        if cache_path.exists():
+            vix = pd.read_csv(cache_path, parse_dates=['Date'])
+        else:
+            vix = yf.download('^VIX', start=start_str, end=end_str, progress=False, auto_adjust=False)
             vix.reset_index(inplace=True)
             if 'index' in vix.columns:
                 vix.rename(columns={'index': 'Date'}, inplace=True)
+        
+        if not vix.empty:
             vix['Date'] = pd.to_datetime(vix['Date'])
             vix['VIX_Level'] = vix['Close']
             vix['VIX_Change'] = vix['Close'].pct_change()
@@ -248,7 +511,16 @@ FEATURE_COLUMNS_DEFAULT: Tuple[str, ...] = (
     'BB_Width', 'BB_Position', 'ATR_Ratio', 'Stoch_K', 'Stoch_D', 'Williams_R',
     'Volatility_Regime', 'High_Volatility', 'Low_Volatility',
     'CMF', 'Ichimoku_A', 'Ichimoku_B', 'Ichimoku_Base', 'Ichimoku_Conversion', 'ROC', 'CCI',
+    # New features
+    'RSI_x_Volume', 'Volatility_x_Momentum', 'Day_of_Week', 'Month', 'FFT_Real', 'FFT_Imag',
     # Market context features (added by add_market_context)
     'SPY_Return', 'SPY_Volatility', 'SPY_Trend_5d', 'Relative_Return', 'Relative_Volatility',
-    'VIX_Level', 'VIX_Change'
+    'VIX_Level', 'VIX_Change',
+    # Sentiment features (added by add_sentiment_features)
+    'Fear_Greed', 'Fear_Greed_MA7', 'Fear_Greed_MA30', 'Fear_Greed_Change', 'Fear_Greed_Change_7d',
+    'Extreme_Fear', 'Extreme_Greed', 'Fear_Zone', 'Greed_Zone', 'Fear_Greed_Rising', 'Fear_Greed_Volatility',
+    # Realized volatility features (added by add_realized_volatility_features) - NEW for Phase 1
+    'Realized_Vol_5d', 'Realized_Vol_20d', 'Realized_Vol_60d', 'Vol_Ratio_20_60', 'Vol_Distance_Mean',
+    'Vol_Persistence', 'Vol_Momentum', 'Vol_of_Vol', 'Vol_Trend_20d', 'Vol_Regime_Low', 
+    'Vol_Regime_High', 'Realized_Vol_EMA_20'
 )

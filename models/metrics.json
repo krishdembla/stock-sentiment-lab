@@ -1,32 +1,33 @@
 {
   "best_params": {
-    "n_estimators": 200,
-    "learning_rate": 0.02,
-    "max_depth": 4,
-    "min_child_weight": 7,
+    "n_estimators": 400,
+    "learning_rate": 0.05,
+    "max_depth": 5,
+    "min_child_weight": 3,
     "subsample": 1.0,
     "colsample_bytree": 0.6,
-    "reg_alpha": 0.001,
-    "reg_lambda": 0.5,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.5,
     "gamma": 0.0
   },
   "train": {
-    "rmse": 0.01006124905701168,
-    "mae": 0.007223125756467174,
-    "r2": 0.6535943975141164
+    "rmse": 0.004998769930325392,
+    "mae": 0.0036514175962394785,
+    "r2": 0.8136637823862759
   },
   "val": {
-    "rmse": 0.014928774616779853,
-    "mae": 0.009318567130160403,
-    "r2": 0.5728931493152924
+    "rmse": 0.011135485933562337,
+    "mae": 0.007003173434252056,
+    "r2": 0.5839970714677458
   },
   "test": {
-    "rmse": 0.009665145966180082,
-    "mae": 0.007034906116543695,
-    "r2": 0.4885305808874262
+    "rmse": 0.007700073599408559,
+    "mae": 0.005279769008769829,
+    "r2": 0.5327907860453688
   },
-  "num_rows": 4770,
-  "period": "4y",
+  "num_rows": 19684,
+  "period": "3y",
+  "target_horizon_days": 3,
   "splits": {
     "train_frac": 0.7,
     "val_frac": 0.15,

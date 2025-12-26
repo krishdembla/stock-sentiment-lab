@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Streamlit app for volatility-based position sizing
-"""
-
 import streamlit as st
 import pandas as pd
 import sys
